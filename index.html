@@ -11,8 +11,7 @@
 <script>
 'use strict';
 // Configure apenas estas duas informações públicas antes de publicar no GitHub Pages.
-const SUPABASE_URL = 'https://czkhsschqlpvrijxlxwj.supabase.co
-';
+const SUPABASE_URL = 'https://czkhsschqlpvrijxlxwj.supabase.co';
 const SUPABASE_PUBLIC_KEY = 'sb_publishable_3nA3e5uLZEImWhqkJKCDhQ_UMd_SpvA';
 const ONLINE_CONFIGURED = /^https:\/\//.test(SUPABASE_URL) && !SUPABASE_PUBLIC_KEY.startsWith('COLE_');
 const online={enabled:ONLINE_CONFIGURED,client:null,user:null,nick:'',revision:null,offset:0,channel:null,ready:false,connected:false,busy:false,pending:null,peers:new Map(),roster:new Map(),lastSync:0,failed:false};
