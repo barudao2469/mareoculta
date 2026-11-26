@@ -303,4 +303,8 @@ normalize();ensureContracts();$('moreBtn').onclick=openMore;$('onlineBtn').oncli
 // Server must independently validate location, timing, RNG, XP, currency, item ownership and idempotency.
 const localGameAdapter={version:6,catalog:fish,probabilities,weatherNow,contractKey,levelInfo,save,normalize};
 window.addEventListener('pagehide',save);document.addEventListener('visibilitychange',()=>{if(document.hidden)save()});render();updateClock();requestAnimationFrame(frame);if(document.readyState==='loading')window.addEventListener('DOMContentLoaded',initOnline,{once:true});else initOnline();
-</script></body></html>
+</script>
+<script src="mare_social.js"></script>
+</body>
+</html>
+
