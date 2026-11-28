@@ -523,29 +523,68 @@ function tickDebris18(now){let el=$('debrisHud18');if(!el)return;if(now-(debris1
 function init18(){document.addEventListener('click',e=>{if(debris18.transaction){e.preventDefault();e.stopImmediatePropagation();}},true);let style=document.createElement('style');style.textContent='.craftgrid18{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:9px}.craftcard18{background:#193b45;border:1px solid #527b7d;border-radius:10px;padding:11px;display:grid;gap:7px}.craftcard18 small{color:#bad4ce}.craftmats18{display:grid;gap:4px;font-size:12px}.ok18{color:#99dfad}.no18{color:#efad99}.craftfoot18{display:flex;align-items:center;justify-content:space-between;gap:5px}#debrisHud18{position:absolute;top:45%;left:50%;transform:translate(-50%,-50%);background:#183944ee;border:1px solid #e9bd6b;color:#fff2c8;padding:8px 13px;border-radius:9px;z-index:7;pointer-events:none;font-size:12px;text-align:center}#debrisHud18[hidden]{display:none}';document.head.append(style);let el=document.createElement('div');el.id='debrisHud18';el.hidden=true;$('sea').append(el);let tray=$('defTray16');for(let [k,n] of [['kit','Reparo artesanal'],['flare','Sinalizador artesanal']]){let b=document.createElement('button');b.className='small';b.dataset.crafttool=k;b.textContent=n;b.onclick=()=>useCraft18(k);tray.append(b);} }
 
 // Beta 1.9 — shared Moby Dick event. State is returned by the existing sync RPC.
-const boss19={data:null,fangs:0,pending:0,busy:false,lastHud:0,shotAt:0,seen:'',warned:new Map(),hit:new Set(),shots:[],lastPose:null,fade:null};
+const boss19={data:null,fangs:0,pending:0,busy:false,lastHud:0,shotAt:0,seen:'',warned:new Map(),hit:new Set(),shots:[],lastPose:null,fade:null,localAim:{x:0,y:0},lockKey:'',riseLocked:false};
 const b19clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
 const b19smooth=n=>{n=b19clamp(n,0,1);return n*n*(3-2*n)};
+const b19lerp=(a,b,t)=>a+(b-a)*t;
+function bossFury19(b){return !!(b&&b.hp>0&&b.hp<=b.max*.5)}
+function bossThreatTarget19(b){
+ let now=performance.now(),list=[{x:player.x,y:player.y,vx:player.vx||0,vy:player.vy||0,me:true}];
+ if(online.peers)for(let peer of online.peers.values())if(peer&&now-peer.seen<4500)list.push({x:peer.x,y:peer.y,vx:peer.vx||0,vy:peer.vy||0,me:false});
+ let refX=b?.ex??b?.tx??player.x,refY=b?.ey??b?.ty??player.y,best=list[0],bestScore=1e9;
+ for(let t of list){let score=Math.hypot(t.x-refX,t.y-refY)+(t.me?-80:0);if(score<bestScore){best=t;bestScore=score}}
+ return best;
+}
+function bossRiseCenter19(b,p){
+ let key=(b?.id||'')+':'+(p?.cycle??-1),def={x:b?.ex??player.x,y:b?.ey??player.y};
+ if(boss19.lockKey!==key){boss19.lockKey=key;boss19.localAim={...def};boss19.riseLocked=false}
+ if(!b||!p||p.ph<11||p.ph>=24)return boss19.localAim;
+ if(p.ph<17.85){
+  let target=bossThreatTarget19(b),lead=.9+(bossFury19(b)?.35:0),tx=b19clamp(target.x+target.vx*lead,70,W-70),ty=b19clamp(target.y+target.vy*lead,70,H-70);
+  boss19.localAim.x=b19lerp(boss19.localAim.x,tx,.18);
+  boss19.localAim.y=b19lerp(boss19.localAim.y,ty,.18);
+  boss19.riseLocked=false;
+ }else if(!boss19.riseLocked){
+  let target=bossThreatTarget19(b),lead=bossFury19(b)?1.1:.8;
+  boss19.localAim={x:b19clamp(target.x+target.vx*lead,70,W-70),y:b19clamp(target.y+target.vy*lead,70,H-70)};
+  boss19.riseLocked=true;
+ }
+ return boss19.localAim;
+}
 function bossPose19(b,ms=gameNow()){
  if(!b||b.cycle<0)return null;let ph=(ms-b.start)/1000-b.cycle*24;
- // Never simulate a new attack cycle until the server has published its locked targets.
  ph=b19clamp(ph,0,23.999);let x=b.ox,y=b.oy,angle=Math.atan2(b.ty-b.oy,b.tx-b.ox),alpha=1,phase='prepare';
- if(ph>=4&&ph<8){let u=b19smooth((ph-4)/4);x=b.ox+(b.tx-b.ox)*u;y=b.oy+(b.ty-b.oy)*u;phase='charge'}
- else if(ph>=8&&ph<11){x=b.tx;y=b.ty;alpha=1-b19smooth((ph-8)/3);phase='dive'}
- else if(ph>=11&&ph<19){x=b.ex;y=b.ey;alpha=0;phase=ph>=15?'warning':'underwater'}
- else if(ph>=19){x=b.ex;y=b.ey;alpha=b19smooth((ph-19)/1.5);phase=ph<21?'rise':'rest'}
+ if(ph<4){
+  let u=ph/4,wob=Math.sin(ms/230)*10;angle=Math.atan2((b.ty-b.oy)+Math.sin(u*4.8)*120,(b.tx-b.ox)+Math.cos(u*4.8)*90);x=b.ox+Math.cos(u*6.2)*28+wob*.2;y=b.oy+Math.sin(u*6.2)*18;
+ }else if(ph>=4&&ph<8){
+  let u=(ph-4)/4,e=u<.7?.88*Math.pow(u/.7,1.45):.88+.12*(1-Math.pow(1-(u-.7)/.3,1.7));x=b.ox+(b.tx-b.ox)*e;y=b.oy+(b.ty-b.oy)*e;phase='charge';
+ }else if(ph>=8&&ph<11){x=b.tx;y=b.ty;alpha=1-b19smooth((ph-8)/3);phase='dive'}
+ else if(ph>=11&&ph<19){let c=bossRiseCenter19(b,{cycle:b.cycle,ph});x=c.x;y=c.y;alpha=0;phase=ph>=15?'warning':'underwater'}
+ else if(ph>=19){let c=bossRiseCenter19(b,{cycle:b.cycle,ph});x=c.x;y=c.y;alpha=b19smooth((ph-19)/1.25);phase=ph<20.85?'rise':'rest';angle=Math.atan2(b.ty-b.oy,b.tx-b.ox)+Math.sin(ms/320)*.05}
  alpha*=b19smooth((ms-b.start)/1600);if(b.dead)alpha*=1-b19smooth((ms-b.dead)/1800);else alpha*=b19smooth((b.end-ms)/1800);
- return {x,y,angle,alpha,phase,ph,cycle:b.cycle};
+ return {x,y,angle,alpha,phase,ph,cycle:b.cycle,fury:bossFury19(b)};
 }
+function bossHitboxes19(p,expand=1){
+ let cs=Math.cos(p.angle),sn=Math.sin(p.angle),parts=[
+  {ox:500,oy:0,rx:240*expand,ry:140*expand,dmg:65,name:'head'},
+  {ox:105,oy:0,rx:355*expand,ry:175*expand,dmg:35,name:'body'},
+  {ox:-385,oy:0,rx:235*expand,ry:120*expand,dmg:20,name:'tail'}
+ ];
+ return parts.map(h=>({...h,x:p.x+h.ox*cs-h.oy*sn,y:p.y+h.ox*sn+h.oy*cs,a:p.angle}));
+}
+function bossPointInHit19(px,py,h){let dx=px-h.x,dy=py-h.y,cs=Math.cos(h.a),sn=Math.sin(h.a),lx=dx*cs+dy*sn,ly=-dx*sn+dy*cs;return (lx*lx)/(h.rx*h.rx)+(ly*ly)/(h.ry*h.ry)<=1}
+function bossAimHit19(px,py,p){return bossHitboxes19(p,1.06).some(h=>bossPointInHit19(px,py,h))}
+function bossChargeDamage19(px,py,p){let max=0;for(let h of bossHitboxes19(p,1.02))if(bossPointInHit19(px,py,h))max=Math.max(max,h.dmg);return max}
+function bossRiseDamage19(px,py,p,b){let c=bossRiseCenter19(b,p),d=Math.hypot(px-c.x,py-c.y);return d<110?80:d<190?45:d<270?20:0}
 function bossAccept19(d){
  const old=boss19.data;boss19.data=d.boss||null;boss19.fangs=Number(d.boss_fangs)||0;boss19.pending=Number(d.boss_pending)||0;
  if(old&&(!boss19.data||old.id!==boss19.data.id)){boss19.fade={data:old,at:gameNow()};}
- if(boss19.data&&boss19.seen!==boss19.data.id){boss19.seen=boss19.data.id;boss19.warned.clear();boss19.hit.clear();if(boss19.data.hp>0){toast('🐋 Moby Dick surgiu no centro do oceano!');playSound('danger');}}
+ if(boss19.data&&boss19.seen!==boss19.data.id){boss19.seen=boss19.data.id;boss19.warned.clear();boss19.hit.clear();boss19.lockKey='';boss19.riseLocked=false;if(boss19.data.hp>0){toast('🐋 Moby Dick surgiu no centro do oceano!');playSound('danger');}}
  if(old&&boss19.data&&old.id===boss19.data.id&&old.hp>0&&boss19.data.hp===0){toast('Moby Dick foi derrotada!');playSound('rare');}
  if(d.boss_message)toast(d.boss_message);
 }
 function bossActive19(){let b=boss19.data;return !!(b&&b.hp>0&&gameNow()<b.end)}
-function bossNear19(){let b=boss19.data,p=bossPose19(b);return bossActive19()&&p&&Math.hypot(player.x-p.x,player.y-p.y)<1000&&!seaSafe16()}
+function bossNear19(){let b=boss19.data,p=bossPose19(b);return bossActive19()&&p&&Math.hypot(player.x-p.x,player.y-p.y)<1200&&!seaSafe16()}
 async function bossAction19(action,arg=''){
  if(!online.enabled||!online.ready||online.failed||online.busy||boss19.busy)return false;
  boss19.busy=true;online.busy=true;debris18.transaction=true;
@@ -556,60 +595,60 @@ async function bossAction19(action,arg=''){
 async function fireBoss19(aim=null){
  let b=boss19.data,p=bossPose19(b),now=performance.now();if(!bossActive19()||!p||modalOpen||fishing||returning||document.hidden||online.busy||boss19.busy)return;
  if(p.ph>=11&&p.ph<19)return toast('Moby Dick está submersa!');
- if(Math.hypot(player.x-p.x,player.y-p.y)>1000)return toast('Aproxime-se para arremessar o arpão.');
- // Clicking the whale validates against its elongated body; the mobile button auto-aims.
- if(aim){let dx=aim.x-p.x,dy=aim.y-p.y,ax=dx*Math.cos(p.angle)+dy*Math.sin(p.angle),ay=-dx*Math.sin(p.angle)+dy*Math.cos(p.angle);if((ax/740)**2+(ay/250)**2>1)return;}
+ if(Math.hypot(player.x-p.x,player.y-p.y)>1200)return toast('Aproxime-se para arremessar o arpão.');
+ if(aim&&!bossAimHit19(aim.x,aim.y,p))return toast('Mire no corpo da baleia para lançar o arpão.');
  if(now-boss19.shotAt<1250)return;let kind=$('bossHeavy19').checked?'heavy':'harpoon';if(!state.craft18[kind])return toast('Fabrique arpões na Oficina do Sucateiro.');
  boss19.shotAt=now;let from={x:player.x,y:player.y},to={x:p.x,y:p.y};let r=await bossAction19('boss_shot19',kind);if(r){boss19.shots.push({from,to,at:performance.now(),heavy:kind==='heavy'});playSound('cast');render();}
 }
-function bossHurt19(dmg,now){if(seaSafe16()||now<sea16Invuln||state.survival.protect.barrier>gameNow())return;sea16Invuln=now+1200;let hp=hull16()-dmg;playSound('impact');log('Moby Dick atingiu o casco: −'+dmg+' HP.');if(hp<=0){sink16();return;}state.survival.hulls[state.boat]=hp;toast('Moby Dick: −'+dmg+' HP');save();render();}
+function bossHurt19(dmg,now){if(!dmg||seaSafe16()||now<sea16Invuln||state.survival.protect.barrier>gameNow())return;sea16Invuln=now+1200;let hp=hull16()-dmg;playSound('impact');log('Moby Dick atingiu o casco: −'+dmg+' HP.');if(hp<=0){sink16();return;}state.survival.hulls[state.boat]=hp;toast('Moby Dick: −'+dmg+' HP');save();render();}
 function bossTick19(now){
  let b=boss19.data,p=bossPose19(b),active=bossActive19();if(active&&p&&!document.hidden&&online.ready&&!online.busy&&!online.failed&&online.connected){
   if(bossNear19()&&returning){returning=null;updateButtons();}
   let dx=b.tx-b.ox,dy=b.ty-b.oy,len=Math.hypot(dx,dy),ux=len?dx/len:1,uy=len?dy/len:0;
-  let a=(player.x-b.ox)*ux+(player.y-b.oy)*uy,cross=Math.abs((player.x-b.ox)*uy-(player.y-b.oy)*ux),inLine=a>=-180&&a<=len+180&&cross<220;
-  let inRise=Math.hypot(player.x-b.ex,player.y-b.ey)<245;
-  let k=b.id+':'+b.cycle+':',warning=p.phase==='prepare'&&inLine?'charge':p.phase==='warning'&&b.aimed&&inRise?'rise':null;
-  if(warning&&!boss19.warned.has(k+warning)){boss19.warned.set(k+warning,now);if(modalOpen)closeModal();playSound('danger');toast(warning==='charge'?'Moby Dick vai investir! Desvie!':'Moby Dick vai emergir! Saia do círculo!');}
-  // Require a warning actually observed on this client; delayed packets must not cause surprise damage.
-  let attack=p.phase==='charge'&&inLine&&Math.hypot(player.x-p.x,player.y-p.y)<340?'charge':p.phase==='rise'&&inRise&&p.ph>=19.45&&p.ph<20.8?'rise':null;
-  if(attack&&boss19.warned.has(k+attack)&&now-boss19.warned.get(k+attack)>=600&&!boss19.hit.has(k+attack)){boss19.hit.add(k+attack);bossHurt19(attack==='charge'?45:65,now);}
+  let a=(player.x-b.ox)*ux+(player.y-b.oy)*uy,cross=Math.abs((player.x-b.ox)*uy-(player.y-b.oy)*ux),inLine=a>=-240&&a<=len+240&&cross<360;
+  let riseD=Math.hypot(player.x-bossRiseCenter19(b,p).x,player.y-bossRiseCenter19(b,p).y),inRise=riseD<320;
+  let k=b.id+':'+b.cycle+':',warning=p.phase==='prepare'&&inLine?'charge':p.phase==='warning'&&inRise?'rise':null;
+  if(warning&&!boss19.warned.has(k+warning)){boss19.warned.set(k+warning,now);if(modalOpen)closeModal();playSound('danger');toast(warning==='charge'?'Moby Dick alinhou uma investida! Saia da frente!':'A água ferveu abaixo do casco! Corra do círculo!');}
+  let chargeDmg=(p.phase==='charge'||(p.phase==='rest'&&p.ph<21.05))?bossChargeDamage19(player.x,player.y,p):0;
+  let riseDmg=p.phase==='rise'&&p.ph>=19.18&&p.ph<20.75?bossRiseDamage19(player.x,player.y,p,b):0;
+  if(chargeDmg&&boss19.warned.has(k+'charge')&&now-boss19.warned.get(k+'charge')>=300&&!boss19.hit.has(k+'charge')){boss19.hit.add(k+'charge');bossHurt19(chargeDmg,now);}
+  if(riseDmg&&boss19.warned.has(k+'rise')&&now-boss19.warned.get(k+'rise')>=250&&!boss19.hit.has(k+'rise')){boss19.hit.add(k+'rise');bossHurt19(riseDmg,now);}
  }
  if(now-boss19.lastHud<200)return;boss19.lastHud=now;let el=$('boss19Hud');if(!el)return;
  let show=b&&(active||(b.dead&&gameNow()-b.dead<5000));el.hidden=!show&&!boss19.pending;
  $('boss19Fight').hidden=!show;$('boss19Loot').hidden=!boss19.pending&&!boss19.fangs;
- if(show){$('boss19Title').textContent='MOBY DICK'+(b.test?' · TESTE':'');$('boss19Hp').textContent=b.hp+' / '+b.max+' HP';$('boss19Bar').style.width=(100*b.hp/b.max)+'%';let sec=Math.max(0,Math.ceil((b.end-gameNow())/1000));$('boss19Time').textContent=b.hp===0?'DERROTADA':Math.floor(sec/60)+':'+String(sec%60).padStart(2,'0');let status=!p?'Aguardando posição…':({prepare:'Preparando investida',charge:'INVESTIDA',dive:'Submergindo',underwater:'Submersa',warning:'⚠ Vai emergir',rise:'EMERGÊNCIA',rest:'Recuperação'})[p.phase];$('boss19Status').textContent=status+' · '+(p?Math.round(Math.hypot(player.x-p.x,player.y-p.y))+' m':'');if(bossNear19()){$('danger16').textContent='⚠ Moby Dick próxima';$('portBtn').disabled=true;}$('bossFire19').disabled=!active||!p||p.ph>=11&&p.ph<19||Math.hypot(player.x-p.x,player.y-p.y)>1000||!!fishing||!!returning||online.busy||!state.craft18[$('bossHeavy19').checked?'heavy':'harpoon'];$('bossAmmo19').textContent='Arpões '+state.craft18.harpoon+' · reforçados '+state.craft18.heavy;}
+ if(show){$('boss19Title').textContent='MOBY DICK'+(b.test?' · TESTE':'')+(bossFury19(b)?' · FÚRIA':'');$('boss19Hp').textContent=b.hp+' / '+b.max+' HP';$('boss19Bar').style.width=(100*b.hp/b.max)+'%';let sec=Math.max(0,Math.ceil((b.end-gameNow())/1000));$('boss19Time').textContent=b.hp===0?'DERROTADA':Math.floor(sec/60)+':'+String(sec%60).padStart(2,'0');let status=!p?'Aguardando posição…':({prepare:'Perseguindo',charge:'INVESTIDA',dive:'Submergindo',underwater:'Caçando sob a água',warning:'⚠ Vai emergir',rise:'EMERGÊNCIA',rest:'Recuperação'})[p.phase];$('boss19Status').textContent=status+' · '+(p?Math.round(Math.hypot(player.x-p.x,player.y-p.y))+' m':'');if(bossNear19()){$('danger16').textContent='⚠ Moby Dick próxima';$('portBtn').disabled=true;}$('bossFire19').disabled=!active||!p||p.ph>=11&&p.ph<19||Math.hypot(player.x-p.x,player.y-p.y)>1200||!!fishing||!!returning||online.busy||!state.craft18[$('bossHeavy19').checked?'heavy':'harpoon'];$('bossAmmo19').textContent='Arpões '+state.craft18.harpoon+' · reforçados '+state.craft18.heavy;}
  $('boss19LootText').textContent='Presas de Moby Dick: '+boss19.fangs+(boss19.pending?' · '+boss19.pending+' prêmio(s) a receber':'');$('bossClaim19').hidden=!boss19.pending;$('bossClaim19').disabled=online.busy;$('bossSell19').hidden=!boss19.fangs;$('bossSell19').disabled=online.busy||!nearPort();
  if(boss19.pending&&!boss19.busy&&!online.busy&&!fishing&&!returning&&!modalOpen)bossAction19('boss_claim19');
 }
 function drawWhale19(c,p,t){
- if(p.alpha<=0||!visible(p.x,p.y,900))return;c.save();c.translate(p.x,p.y);c.rotate(p.angle);c.globalAlpha=p.alpha;
- // Length ~1,520 map units, >4x the Kraken's fully extended ~350-unit silhouette.
+ if(p.alpha<=0||!visible(p.x,p.y,980))return;c.save();c.translate(p.x,p.y);c.rotate(p.angle);c.globalAlpha=p.alpha;
  let tail=Math.sin(t*2.8)*28;ellipse(c,0,26,702,206,'#122e4660');
- // Broad articulated flukes, pectoral fins and scarred sperm-whale body.
  let fin=grad161(c,0,-210,0,210,[[0,'#c9d8d8'],[.45,'#f6f3e9'],[1,'#829da9']]);
  for(let side of [-1,1])shape161(c,fin,'#4e6b7c',q=>{q.moveTo(155,side*105);q.bezierCurveTo(65,side*155,-58,side*248,-168,side*267);q.bezierCurveTo(-126,side*211,-96,side*141,-105,side*100);q.closePath()},5);
  shape161(c,fin,'#4e6b7c',q=>{q.moveTo(-485,-34);q.bezierCurveTo(-595,tail-42,-675,tail-178,-775,tail-165);q.bezierCurveTo(-746,tail-69,-693,tail-16,-636,tail);q.bezierCurveTo(-693,tail+16,-746,tail+69,-775,tail+165);q.bezierCurveTo(-675,tail+178,-595,tail+42,-485,34);q.closePath()},5);
  let body=grad161(c,0,-200,0,200,[[0,'#a9c5cb'],[.15,'#e3e9e4'],[.43,'#fffaf0'],[.67,'#e5e9e2'],[1,'#809ba7']]);
  shape161(c,body,'#506d7b',q=>{q.moveTo(700,-108);q.bezierCurveTo(720,-66,722,67,690,119);q.bezierCurveTo(624,176,460,197,259,178);q.bezierCurveTo(26,166,-192,121,-372,65);q.bezierCurveTo(-457,36,-508,29,-567,18);q.lineTo(-567,-18);q.bezierCurveTo(-508,-29,-457,-36,-372,-65);q.bezierCurveTo(-192,-121,26,-166,259,-178);q.bezierCurveTo(460,-197,624,-176,700,-108);q.closePath()},6);
- // Rugged white head, skin ridges, eye and scratches; not a scaled shark.
  shape161(c,null,'#829da7b0',q=>{q.moveTo(626,-152);q.bezierCurveTo(580,-120,578,120,620,151)},4);
  for(let side of [-1,1]){shape161(c,null,'#607e90b0',q=>{q.moveTo(704,side*76);q.quadraticCurveTo(596,side*124,478,side*125)},4);ellipse(c,472,side*142,15,10,'#526778');ellipse(c,477,side*142,6,5,'#121f2a');ellipse(c,479,side*139,2.5,2.5,'#fff8d7');}
  for(let i=0;i<13;i++){let x=-330+i*65,y=Math.sin(i*2.1)*77;shape161(c,null,'#8299a250',q=>{q.moveTo(x-23,y-13);q.quadraticCurveTo(x+8,y-3,x+29,y+7)},2.5);}
  for(let i=0;i<5;i++){let x=304+i*24,y=-65+i*8;shape161(c,null,'#a68683b0',q=>{q.moveTo(x-18,y-30);q.quadraticCurveTo(x,y,x+28,y+22)},3.5)}
  shape161(c,null,'#fffdf1b5',q=>{q.moveTo(-290,-62);q.bezierCurveTo(-65,-135,240,-160,530,-129)},9);
  ellipse(c,585,-36,17,9,'#657f8c');ellipse(c,585,-38,9,4,'#304b58');
- if(p.phase==='charge'){c.strokeStyle='#e8f8f3aa';c.lineWidth=5;for(let i=0;i<5;i++){c.beginPath();c.moveTo(-670-i*40,-120-i*18);c.quadraticCurveTo(-800-i*55,0,-670-i*40,120+i*18);c.stroke()}}
+ if(p.phase==='charge'){c.strokeStyle='#e8f8f3aa';c.lineWidth=5;for(let i=0;i<6;i++){c.beginPath();c.moveTo(-680-i*55,-140-i*18);c.quadraticCurveTo(-860-i*75,0,-680-i*55,140+i*18);c.stroke()}}
+ if(p.fury){c.strokeStyle='#ffd1ad66';c.lineWidth=4;c.beginPath();c.ellipse(110,0,610,225,0,0,6.283);c.stroke()}
  c.restore();
 }
 function drawBoss19(c,t){let b=boss19.data,p=bossPose19(b);if(b&&p&&(bossActive19()||b.dead&&gameNow()-b.dead<1800)){
- if(b.hp>0){c.save();if(p.phase==='prepare'){let angle=Math.atan2(b.ty-b.oy,b.tx-b.ox),len=Math.hypot(b.tx-b.ox,b.ty-b.oy);c.translate(b.ox,b.oy);c.rotate(angle);c.fillStyle='#ff785a30';c.strokeStyle='#ffd4a4';c.lineWidth=4;c.setLineDash([22,14]);c.fillRect(-180,-220,len+360,440);c.strokeRect(-180,-220,len+360,440)}else if(p.phase==='warning'&&b.aimed||p.phase==='rise'){let u=b19clamp((p.ph-15)/4,0,1);c.fillStyle='#ff755c32';c.strokeStyle='#ffcf91';c.lineWidth=5;c.setLineDash([20,12]);c.beginPath();c.arc(b.ex,b.ey,245,0,6.283);c.fill();c.stroke();c.setLineDash([]);c.beginPath();c.arc(b.ex,b.ey,245*u,0,6.283);c.stroke();if(p.phase==='rise'){for(let i=0;i<3;i++){c.strokeStyle='#e5faf1aa';c.beginPath();c.ellipse(b.ex,b.ey,90+i*65+(p.ph-19)*85,45+i*32+(p.ph-19)*42,0,0,6.283);c.stroke()}}}c.restore()}
+ if(b.hp>0){c.save();
+  if(p.phase==='prepare'){let angle=Math.atan2(b.ty-b.oy,b.tx-b.ox),len=Math.hypot(b.tx-b.ox,b.ty-b.oy);c.translate(b.ox,b.oy);c.rotate(angle);c.fillStyle='#ff785a26';c.strokeStyle='#ffd4a4';c.lineWidth=4;c.setLineDash([22,14]);c.beginPath();c.moveTo(-210,-280);c.lineTo(len+260,-180);c.lineTo(len+260,180);c.lineTo(-210,280);c.closePath();c.fill();c.stroke();}
+  else if(p.phase==='warning'||p.phase==='rise'){let cen=bossRiseCenter19(b,p),u=b19clamp((p.ph-15)/4,0,1);c.fillStyle='#ff755c30';c.strokeStyle='#ffcf91';c.lineWidth=5;c.setLineDash([20,12]);for(let r of [270,190,110]){c.beginPath();c.arc(cen.x,cen.y,r,0,6.283);if(r===270)c.fill();c.stroke()}c.setLineDash([]);if(p.phase!=='rise'){c.beginPath();c.arc(cen.x,cen.y,270*u,0,6.283);c.stroke();ellipse(c,cen.x,cen.y,88+u*38,34+u*14,'#102b3cb0');for(let i=0;i<4;i++){c.strokeStyle='#dff8f0'+(8-i);c.beginPath();c.ellipse(cen.x,cen.y,42+i*28+Math.sin(t*4+i)*6,18+i*12+Math.cos(t*4+i)*3,0,0,6.283);c.stroke()}}else{for(let i=0;i<4;i++){c.strokeStyle='#e5faf1aa';c.beginPath();c.ellipse(cen.x,cen.y,95+i*68+(p.ph-19)*95,48+i*30+(p.ph-19)*46,0,0,6.283);c.stroke()}}}
+  c.restore()}
  drawWhale19(c,p,t);
  }else if(boss19.fade&&gameNow()-boss19.fade.at<1800){let q=bossPose19(boss19.fade.data,boss19.fade.at);if(q){q.alpha*=1-b19smooth((gameNow()-boss19.fade.at)/1800);drawWhale19(c,q,t)}}
  boss19.shots=boss19.shots.filter(s=>performance.now()-s.at<750);for(let s of boss19.shots){let k=b19clamp((performance.now()-s.at)/500,0,1),x=s.from.x+(s.to.x-s.from.x)*k,y=s.from.y+(s.to.y-s.from.y)*k;c.save();c.strokeStyle=s.heavy?'#ffe7a1':'#e9ede6';c.lineWidth=s.heavy?5:3;c.beginPath();c.moveTo(s.from.x+(s.to.x-s.from.x)*Math.max(0,k-.12),s.from.y+(s.to.y-s.from.y)*Math.max(0,k-.12));c.lineTo(x,y);c.stroke();c.restore()}}
 function drawBossMap19(c,big){if(!bossActive19())return;let p=bossPose19(boss19.data);if(!p)return;ellipse(c,p.x,p.y,big?62:85,big?62:85,'#fff0d3');c.strokeStyle='#c04f4f';c.lineWidth=big?15:24;c.beginPath();c.arc(p.x,p.y,big?95:125,0,6.283);c.stroke();if(big){c.fillStyle='#fff1d1';c.strokeStyle='#183643';c.lineWidth=12;c.font='bold 82px system-ui';c.textAlign='center';c.strokeText('MOBY DICK',p.x,p.y-120);c.fillText('MOBY DICK',p.x,p.y-120)}}
 function initBoss19(){let css=document.createElement('style');css.textContent='#boss19Hud{position:absolute;z-index:8;top:8px;left:50%;transform:translateX(-50%);width:min(300px,42%);background:#142d3dec;border:1px solid #e4c995;border-radius:10px;padding:7px 9px;color:#fff0d2;font-size:11px;box-shadow:0 3px 12px #10223388;pointer-events:auto}#boss19Hud[hidden],#boss19Hud [hidden]{display:none!important}.b19row{display:flex;gap:5px;align-items:center;justify-content:space-between}.b19track{height:7px;background:#0a202c;border-radius:5px;overflow:hidden;margin:4px 0}.b19track i{display:block;height:100%;background:#d87970;transition:width .2s}#boss19Hud button{font-size:11px;padding:5px 7px;min-height:27px}#boss19Hud label{display:flex;align-items:center;gap:3px;font-size:10px}#boss19Hud input{width:auto}#boss19Loot{margin-top:5px} @media(max-width:850px){#boss19Hud{top:auto;bottom:91px;left:50%;width:min(270px,62%);padding:5px 6px}#boss19Hud button{font-size:10px;min-height:24px}}';document.head.append(css);let el=document.createElement('div');el.id='boss19Hud';el.hidden=true;el.innerHTML='<div id="boss19Fight"><div class="b19row"><b id="boss19Title">MOBY DICK</b><b id="boss19Time"></b></div><div class="b19track"><i id="boss19Bar"></i></div><div class="b19row"><span id="boss19Hp"></span><span id="boss19Status"></span></div><div class="b19row"><button class="gold" id="bossFire19">Arremessar · F</button><label><input type="checkbox" id="bossHeavy19"> Reforçado</label></div><small id="bossAmmo19"></small></div><div id="boss19Loot" hidden><small id="boss19LootText"></small><div class="b19row"><button id="bossClaim19" class="small">Receber prêmio</button><button id="bossSell19" class="small">Vender na Peixaria</button></div></div>';$('sea').append(el);$('bossFire19').onclick=()=>fireBoss19();$('bossClaim19').onclick=()=>bossAction19('boss_claim19');$('bossSell19').onclick=()=>bossAction19('boss_sell19');window.addEventListener('keydown',e=>{if(e.repeat||e.ctrlKey||e.altKey||e.metaKey||/INPUT|TEXTAREA|SELECT/.test(e.target.tagName))return;if(e.key.toLowerCase()==='f'){e.preventDefault();fireBoss19()}});
- // Handle command before the chat module's submit handler, never send it as a public message.
  document.addEventListener('submit',e=>{if(e.target.id!=='mareChatForm')return;let input=$('mareChatInput');if(input?.value.trim().toLowerCase()!=='/chupetadebaleia')return;e.preventDefault();e.stopImmediatePropagation();input.value='';bossAction19('boss_test19');},true);
  canvas.addEventListener('click',e=>{if(!bossNear19())return;let r=canvas.getBoundingClientRect();fireBoss19({x:(e.clientX-r.left)/(cam.zoom||1)+cam.x,y:(e.clientY-r.top)/(cam.zoom||1)+cam.y});});
 }
